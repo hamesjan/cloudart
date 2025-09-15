@@ -1,0 +1,373 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Neon Arcade Flight (Gamepad + Keyboard)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    html, body { margin:0; height:100%; overflow:hidden; background:#000; }
+    #hud {
+      position: fixed; left: 12px; top: 12px; color: #0ff; font: 14px/1.3 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      text-shadow: 0 0 8px #0ff; pointer-events: none; white-space: pre;
+    }
+    #help {
+      position: fixed; right: 12px; top: 12px; color:#fff; opacity:.8; font: 12px/1.35 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      text-align: right; max-width: 38ch;
+    }
+    .badge { color:#ff3; text-shadow: 0 0 6px #ff3; }
+  </style>
+</head>
+<body>
+<div id="hud"></div>
+<div id="help">
+  <div><span class="badge">Controls</span></div>
+  <div>• Left stick: pitch/roll</div>
+  <div>• Button 0: throttle boost</div>
+  <div>• Button 1: brake</div>
+  <div>• LB / RB (or Q / E): yaw</div>
+  <div>• Arrows / WASD: fallback</div>
+  <div>• C: toggle camera</div>
+  <div style="margin-top:.5rem"><span class="badge">Goal</span>: fly through glowing rings</div>
+</div>
+
+<script type="module">
+import * as THREE from './three.module.js';
+import { EffectComposer } from './EffectComposer.js';
+import { RenderPass } from './RenderPass.js';
+import { UnrealBloomPass } from './UnrealBloomPass.js';
+const hudEl = document.getElementById('hud');
+
+// --- renderer / scene / camera ---
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.fog = new THREE.FogExp2(0x02040a, 0.008);
+
+// cameras
+const chaseCam = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.1, 4000);
+const cockpitCam = new THREE.PerspectiveCamera(80, innerWidth/innerHeight, 0.1, 4000);
+let useCockpit = false;
+
+// postprocessing (arcade glow)
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, chaseCam));
+const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 1.25, 0.45, 0.85);
+bloom.threshold = 0.0;
+bloom.strength = 1.4;    // glow intensity
+bloom.radius = 0.6;
+composer.addPass(bloom);
+
+// --- neon grid ground (shader) ---
+const gridMat = new THREE.ShaderMaterial({
+  uniforms: {
+    uTime: { value: 0 },
+    uColorLine: { value: new THREE.Color(0x00ffff) },
+    uColorFill: { value: new THREE.Color(0x04091a) },
+    uGlow: { value: 1.8 },
+    uScale: { value: 0.5 }
+  },
+  vertexShader: `
+    varying vec3 vPos;
+    void main() {
+      vPos = position;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0);
+    }`,
+  fragmentShader: `
+    varying vec3 vPos;
+    uniform float uGlow;
+    uniform float uScale;
+    uniform vec3 uColorLine, uColorFill;
+    void main() {
+      // neon grid lines every 10 units on X/Z
+      float gx = abs(fract(vPos.x * 0.1) - 0.5);
+      float gz = abs(fract(vPos.z * 0.1) - 0.5);
+      float line = smoothstep(0.49, 0.495, 0.5 - min(gx,gz));
+      vec3 col = mix(uColorFill, uColorLine * 5.0, pow(line, uGlow));
+      gl_FragColor = vec4(col, 1.0);
+    }`,
+  fog: false
+});
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(5000, 5000, 1, 1), gridMat);
+ground.rotation.x = -Math.PI/2;
+ground.position.y = -8;
+ground.receiveShadow = false;
+scene.add(ground);
+
+// --- starfield dome ---
+const starGeo = new THREE.SphereGeometry(2000, 32, 16);
+const starMat = new THREE.MeshBasicMaterial({ side: THREE.BackSide, color: 0x03040b });
+const starDome = new THREE.Mesh(starGeo, starMat);
+scene.add(starDome);
+
+// sprinkle some parallax stars (billboards)
+const starSprites = new THREE.Group();
+const starTex = new THREE.Texture(generateDotTexture());
+starTex.needsUpdate = true;
+for (let i=0;i<400;i++){
+  const m = new THREE.SpriteMaterial({ map: starTex, color: 0x66ccff, transparent:true, opacity: 0.6 });
+  const s = new THREE.Sprite(m);
+  s.scale.setScalar(THREE.MathUtils.randFloat(0.6, 2.5));
+  s.position.set( (Math.random()-0.5)*1200, Math.random()*600+20, (Math.random()-0.5)*1200 );
+  starSprites.add(s);
+}
+scene.add(starSprites);
+function generateDotTexture(){
+  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const ctx = c.getContext('2d');
+  ctx.clearRect(0,0,64,64);
+  const g = ctx.createRadialGradient(32,32,2, 32,32,26);
+  g.addColorStop(0,'rgba(255,255,255,1)');
+  g.addColorStop(1,'rgba(255,255,255,0)');
+  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(32,32,26,0,Math.PI*2); ctx.fill();
+  return c;
+}
+
+// --- ship (sleek neon wedge) ---
+const ship = new THREE.Group();
+{
+  const hull = new THREE.Mesh(
+    new THREE.ConeGeometry(1.2, 4.2, 3), 
+    new THREE.MeshStandardMaterial({ color: 0x00ffff, emissive:0x00ffff, emissiveIntensity:1.6, metalness:0.4, roughness:0.2 })
+  );
+  hull.rotation.z = Math.PI; // point forward
+  hull.position.y = 0.5;
+  ship.add(hull);
+
+  const wingMat = new THREE.MeshStandardMaterial({ color: 0xff00aa, emissive:0xff00aa, emissiveIntensity:1.4, metalness:0.2, roughness:0.4 });
+  const wing = new THREE.Mesh(new THREE.BoxGeometry(3.8, .09, 0.4), wingMat);
+  wing.position.set(0, 0, -0.4);
+  ship.add(wing);
+
+  const tail = new THREE.Mesh(new THREE.BoxGeometry(0.2, 1.0, 0.2), wingMat);
+  tail.position.set(0, 0.8, -1.0);
+  ship.add(tail);
+
+  // engine glow
+  const engine = new THREE.Mesh(new THREE.SphereGeometry(0.35, 16, 16),
+    new THREE.MeshBasicMaterial({ color: 0xffe066 })
+  );
+  engine.position.set(0,0.2, 1.6);
+  ship.add(engine);
+}
+scene.add(ship);
+
+// ship lighting
+const hemi = new THREE.HemisphereLight(0x99ccff, 0x001122, 0.8);
+scene.add(hemi);
+const key = new THREE.SpotLight(0x66ccff, 2.0, 200, Math.PI/6, 0.4);
+key.position.set(40, 50, 20);
+scene.add(key);
+
+// --- rings (collectables) ---
+const rings = new THREE.Group();
+scene.add(rings);
+const RING_COUNT = 16;
+const ringGeom = new THREE.TorusGeometry(3.0, 0.22, 16, 64);
+for (let i=0;i<RING_COUNT;i++){
+  rings.add(makeRing(i));
+}
+function makeRing(i){
+  const col = new THREE.Color().setHSL(Math.random(), 0.9, 0.55);
+  const mat = new THREE.MeshBasicMaterial({ color: col, transparent:true });
+  const mesh = new THREE.Mesh(ringGeom, mat);
+  respawnRing(mesh, i);
+  return mesh;
+}
+function respawnRing(mesh, i){
+  const dist = 80 + i*40 + Math.random()*60;
+  const spread = 40;
+  mesh.position.copy(ship.position)
+    .add(forwardVector(ship).multiplyScalar(dist))
+    .add(new THREE.Vector3(
+      THREE.MathUtils.randFloatSpread(spread),
+      THREE.MathUtils.randFloatSpread(spread*0.6),
+      THREE.MathUtils.randFloatSpread(spread)
+    ));
+  mesh.lookAt(mesh.position.clone().add(forwardVector(ship)));
+}
+
+// --- speed lines (arcadey motion feel) ---
+const speedLines = new THREE.Group();
+scene.add(speedLines);
+const lineGeo = new THREE.CylinderGeometry(0.01, 0.01, 2.2, 6, 1, true);
+const lineMat = new THREE.MeshBasicMaterial({ color: 0x99ddff, transparent:true, opacity:0.6 });
+for (let i=0;i<120;i++){
+  const m = new THREE.Mesh(lineGeo, lineMat);
+  resetSpeedLine(m, true);
+  speedLines.add(m);
+}
+function resetSpeedLine(m, init=false){
+  const r = 80;
+  const ahead = init ? Math.random()*160+20 : 120 + Math.random()*120;
+  const offset = new THREE.Vector3(
+    THREE.MathUtils.randFloatSpread(r),
+    THREE.MathUtils.randFloatSpread(r*0.5),
+    THREE.MathUtils.randFloatSpread(r)
+  );
+  m.position.copy(ship.position).add(forwardVector(ship).multiplyScalar(ahead)).add(offset);
+  m.rotation.copy(ship.rotation);
+}
+
+// --- cameras ---
+ship.position.set(0, 4, 0);
+let camLerp = 0.12;
+function updateCameras(){
+  const behind = new THREE.Vector3(0, 1.2, 6); // local space behind
+  const look = ship.position.clone();
+  const targetChasePos = ship.localToWorld(behind.clone().multiplyScalar(1));
+  chaseCam.position.lerp(targetChasePos, camLerp);
+  chaseCam.lookAt(look);
+
+  const cockpitOffset = new THREE.Vector3(0, 0.35, 0.6);
+  const cockPos = ship.localToWorld(cockpitOffset);
+  cockpitCam.position.copy(cockPos);
+  cockpitCam.quaternion.copy(ship.quaternion);
+}
+
+// --- physics / input state ---
+let speed = 45;           // base units/sec
+let throttle = 0.6;       // 0..1.6
+const minThrottle = 0.25, maxThrottle = 1.6;
+let pitch = 0, yaw = 0, roll = 0;
+const pitchRate = 1.8, yawRate = 1.6, rollRate = 2.2;
+const autoLevel = 0.8;    // roll auto-damp
+const maxBank = 0.75;     // ~43deg
+
+// keyboard fallback
+const keys = new Set();
+onkeydown = (e)=>{ if (!e.repeat) keys.add(e.key.toLowerCase()); if(e.key==='c') useCockpit = !useCockpit; };
+onkeyup   = (e)=>{ keys.delete(e.key.toLowerCase()); };
+
+// gamepad helpers
+let padIndex = null;
+let biasX = 0, biasY = 0;  // center calibration
+let calibrated = false, calibFrames = 0;
+function getPad(){
+  const pads = navigator.getGamepads?.() || [];
+  if (padIndex==null){
+    for (let i=0;i<pads.length;i++) if (pads[i]) { padIndex = i; break; }
+  }
+  return padIndex!=null ? pads[padIndex] : null;
+}
+function axisWithDeadzone(v, dz=0.12){
+  if (Math.abs(v)<dz) return 0;
+  return (Math.abs(v)-dz)/(1-dz)*Math.sign(v);
+}
+
+// main loop
+let last = performance.now();
+let score = 0;
+function loop(now){
+  requestAnimationFrame(loop);
+  const dt = Math.min(0.033, (now-last)/1000); last = now;
+
+  // input
+  let iPitch=0, iRoll=0, iYaw=0, boost=false, brake=false;
+  const pad = getPad();
+  if (pad){
+    // calibrate center bias for the first second
+    const rawX = pad.axes[0] ?? 0;
+    const rawY = pad.axes[1] ?? 0;
+    if (!calibrated && calibFrames<60){
+      biasX = (biasX*calibFrames + rawX) / (calibFrames+1);
+      biasY = (biasY*calibFrames + rawY) / (calibFrames+1);
+      calibFrames++;
+      if (calibFrames>=60) calibrated = true;
+    }
+    const x = axisWithDeadzone((rawX - biasX), 0.14);
+    const y = axisWithDeadzone((rawY - biasY), 0.14);
+    iRoll  = -x;
+    iPitch = -y; // invert Y: up stick = pitch down (noses up visually)
+    // yaw on LB/RB or triggers if present
+    const lb = pad.buttons[4]?.pressed, rb = pad.buttons[5]?.pressed;
+    const lt = (pad.axes[2]??0) > 0.3, rt = (pad.axes[5]??0) > 0.3;
+    iYaw = (rb||rt ? 1:0) - (lb||lt ? 1:0);
+    boost = !!pad.buttons[0]?.pressed; // Button 0 = throttle boost
+    brake = !!pad.buttons[1]?.pressed;
+  }
+
+  // keyboard fallback (WASD / arrows / QE yaw / Space boost / Shift brake)
+  if (keys.size){
+    if (keys.has('arrowup') || keys.has('w')) iPitch += 1;
+    if (keys.has('arrowdown') || keys.has('s')) iPitch -= 1;
+    if (keys.has('arrowleft') || keys.has('a')) iRoll  += 1;
+    if (keys.has('arrowright')|| keys.has('d')) iRoll  -= 1;
+    if (keys.has('q')) iYaw -= 1;
+    if (keys.has('e')) iYaw += 1;
+    if (keys.has(' ')) boost = true;
+    if (keys.has('shift')) brake = true;
+  }
+
+  // throttle
+  const tAccel = boost ? 0.9 : (brake ? -0.9 : -0.2);
+  throttle = THREE.MathUtils.clamp(throttle + tAccel*dt, minThrottle, maxThrottle);
+
+  // integrate angles (arcade: yaw also slowly follows bank)
+  pitch = THREE.MathUtils.clamp(pitch + iPitch*pitchRate*dt, -0.9, 0.9);
+  roll  = THREE.MathUtils.clamp(roll  + iRoll*rollRate*dt,  -maxBank, maxBank);
+  yaw   = yaw + (iYaw*yawRate + roll*0.6)*dt;
+
+  // auto-level roll when no input
+  roll *= 1.0 - Math.min(autoLevel*dt, 0.12);
+  // soften pitch
+  pitch *= 1.0 - 0.40*dt;
+
+  // apply orientation
+  ship.rotation.set(pitch, yaw, roll);
+
+  // move forward
+  const fwd = forwardVector(ship);
+  const v = fwd.multiplyScalar(speed*throttle*dt);
+  ship.position.add(v);
+
+  // keep above ground
+  ship.position.y = Math.max(ship.position.y, -2.0 + Math.abs(Math.sin(now*0.0005))*0.2);
+
+  // move stars / speed lines relative to ship
+  for (const s of speedLines.children){
+    s.position.addScaledVector(fwd, -speed*throttle*dt*2.8);
+    if (s.position.distanceToSquared(ship.position) > 200*200) resetSpeedLine(s);
+  }
+
+  // ring collection
+  for (const r of rings.children){
+    if (r.position.distanceTo(ship.position) < 4.0){
+      score += Math.round(5 + 12*throttle);
+      r.material.color.setHSL(Math.random(), 0.9, 0.55);
+      respawnRing(r, 0);
+    }
+  }
+
+  // cameras & render
+  updateCameras();
+  composer.passes[0].camera = useCockpit ? cockpitCam : chaseCam;
+  composer.render(dt);
+
+  // HUD
+  hudEl.textContent =
+`SPEED ${(speed*throttle).toFixed(1)}  THROTTLE ${(throttle*100|0)}%
+PITCH ${rad2deg(pitch)}°  ROLL ${rad2deg(roll)}°  YAW ${rad2deg(yaw% (Math.PI*2))}
+SCORE ${score}    CAM ${useCockpit? 'COCKPIT':'CHASE'}    ${getPad()?'GAMEPAD':'KEYBOARD'}`;
+}
+requestAnimationFrame(loop);
+
+// helpers
+function forwardVector(obj){
+  return new THREE.Vector3(0,0,-1).applyQuaternion(obj.quaternion).normalize();
+}
+function rad2deg(r){ return (r*180/Math.PI).toFixed(0); }
+
+// resize
+addEventListener('resize', ()=>{
+  chaseCam.aspect = cockpitCam.aspect = innerWidth/innerHeight;
+  chaseCam.updateProjectionMatrix(); cockpitCam.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+  composer.setSize(innerWidth, innerHeight);
+});
+
+</script>
+</body>
+</html>
