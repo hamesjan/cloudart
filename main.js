@@ -90,6 +90,9 @@ controls.minPolarAngle = 0.05;             // can look slightly up from ground
 controls.maxPolarAngle = Math.PI / 2.05;   // don't flip above the plane
 
 let useChaseCam = true;
+// --- Smoke state ---
+let smokeEnabled = true; // start ON
+
 
 // --- Chase camera updater ---
 function updateChaseCam() {
@@ -150,6 +153,12 @@ function loop(now){
   if (pad){
     const ax0 = pad.axes[0] ?? 0;
     const ax1 = pad.axes[1] ?? 0;
+      // Toggle smoke with gamepad Button 0 (on press, not hold)
+    if (pad.buttons[0]?.pressed && !pad.prevSmokePressed) {
+      smokeEnabled = !smokeEnabled;
+      console.log("Smoke:", smokeEnabled ? "ON" : "OFF");
+    }
+    pad.prevSmokePressed = pad.buttons[0]?.pressed;
 
     const nearCenter = Math.hypot(ax0-centerX, ax1-centerY) < 0.20;
     if (!calibrated && nearCenter && calibFrames < 60) {
@@ -184,6 +193,12 @@ function loop(now){
     if (keys.has('e')) iYaw += 1;
     if (keys.has(' ')) tUp = true;
     if (keys.has('shift')) tDown = true;
+      if (keys.has('t')) {
+    smokeEnabled = !smokeEnabled;
+    keys.delete('t'); // prevents multiple toggles while held
+    console.log("Smoke:", smokeEnabled ? "ON" : "OFF");
+  }
+
   }
 
   if (tUp)   throttle = Math.min(throttleMax, throttle + throttleAccel*dt);
@@ -207,15 +222,17 @@ function loop(now){
   const smokeGeo = new THREE.SphereGeometry(0.3, 8, 8);
   const smokeMat = new THREE.MeshBasicMaterial({ color: 0x888888, transparent: true, opacity: 0.6 });
 
-  const puff = new THREE.Mesh(smokeGeo, smokeMat);
-  puff.position.copy(ship.position);
 
-  // move puff slightly backward (so it appears at the engine)
-  const back = new THREE.Vector3(0,0,1).applyQuaternion(ship.quaternion).multiplyScalar(2);
-  puff.position.add(back);
+  if (smokeEnabled) {
+    const puff = new THREE.Mesh(smokeGeo, smokeMat.clone());
+    puff.position.copy(ship.position);
 
-  puff.userData = { life: 1.0 }; // track fade
-  smokeGroup.add(puff);
+    const back = new THREE.Vector3(0,0,1).applyQuaternion(ship.quaternion).multiplyScalar(2);
+    puff.position.add(back);
+
+    puff.userData = { life: 3.0 };
+    smokeGroup.add(puff);
+  }
 
   // --- Update smoke particles ---
   for (let i = smokeGroup.children.length - 1; i >= 0; i--) {
