@@ -1,0 +1,29 @@
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #142033;
+}
+
+#hud {
+  position: fixed;
+  left: 12px;
+  top: 12px;
+  color: #dff;
+  font: 13px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  text-shadow: 0 0 6px #0ff7;
+  white-space: pre;
+  user-select: none;
+}
+
+#help {
+  position: fixed;
+  right: 12px;
+  top: 12px;
+  color: #fff;
+  opacity: .9;
+  font: 12px/1.35 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  text-align: right;
+  max-width: 42ch;
+  user-select: none;
+}
