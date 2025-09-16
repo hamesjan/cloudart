@@ -1,8 +1,12 @@
 import * as THREE from 'https://unpkg.com/three@0.159.0/build/three.module.js';
+import { OrbitControls } from './orbit_ctrls.js';
 
 const hud = document.getElementById('hud');
+const help = document.getElementById('help');
+const btnView = document.getElementById('toggleView');
+const btnHUD  = document.getElementById('toggleHUD');
 
-// --- Renderer / Scene / Camera ---
+// --- Renderer / Scene ---
 const renderer = new THREE.WebGLRenderer({ antialias:true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.setSize(innerWidth, innerHeight);
@@ -17,8 +21,6 @@ const sun = new THREE.DirectionalLight(0xffffff, 0.9);
 sun.position.set(20, 30, 10);
 scene.add(sun);
 
-const camera = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.1, 2000);
-
 // --- World: ground + reference boxes ---
 const ground = new THREE.GridHelper(4000, 200, 0x3ac7ff, 0x154e7a);
 ground.position.y = -5;
@@ -29,9 +31,7 @@ scene.add(refGroup);
 for (let i = 0; i < 60; i++) {
   const m = new THREE.Mesh(
     new THREE.BoxGeometry(4, THREE.MathUtils.randFloat(4,14), 4),
-    new THREE.MeshStandardMaterial({ 
-      color: 0x7dd3fc, metalness:0.1, roughness:0.6 
-    })
+    new THREE.MeshStandardMaterial({ color: 0x7dd3fc, metalness:0.1, roughness:0.6 })
   );
   const r = THREE.MathUtils.randFloat(40, 400);
   const a = Math.random() * Math.PI * 2;
@@ -44,9 +44,8 @@ const ship = new THREE.Group();
 {
   const hull = new THREE.Mesh(
     new THREE.ConeGeometry(0.8, 2.8, 6),
-    new THREE.MeshStandardMaterial({ 
-      color: 0x8bf6ff, metalness:0.2, roughness:0.3,
-      emissive:0x1c7ea3, emissiveIntensity:0.25 
+    new THREE.MeshStandardMaterial({
+      color: 0x8bf6ff, metalness:0.2, roughness:0.3, emissive:0x1c7ea3, emissiveIntensity:0.25
     })
   );
   hull.rotation.z = Math.PI;
@@ -55,9 +54,8 @@ const ship = new THREE.Group();
 
   const wings = new THREE.Mesh(
     new THREE.BoxGeometry(3.0, 0.08, 0.3),
-    new THREE.MeshStandardMaterial({ 
-      color: 0xff9bd4, metalness:0.2, roughness:0.45,
-      emissive:0x8a2a60, emissiveIntensity:0.15 
+    new THREE.MeshStandardMaterial({
+      color: 0xff9bd4, metalness:0.2, roughness:0.45, emissive:0x8a2a60, emissiveIntensity:0.15
     })
   );
   wings.position.set(0, 0, -0.2);
@@ -66,19 +64,46 @@ const ship = new THREE.Group();
 ship.position.set(0, 4, 0);
 scene.add(ship);
 
-// --- Chase camera ---
+// --- Cameras ---
+const chaseCam = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.1, 2000);
+chaseCam.position.set(0, 6, 8);
+chaseCam.lookAt(ship.position);
+
+// Ground spectator camera (fixed world position, orbit around the ship)
+const groundCam = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.1, 2000);
+// groundCam.position.set(0, 18, 60);
+groundCam.position.set(0, ground.position.y + 10, 80);
+// groundCam.lookAt(ship.position);
+
+const controls = new OrbitControls(groundCam, renderer.domElement);
+controls.enableDamping = true;
+controls.enablePan = true;
+controls.enableZoom = true;
+controls.target.copy(ship.position);
+// Keep it feeling like a ground camera
+controls.minDistance = 8;
+controls.maxDistance = 220;
+controls.minPolarAngle = 0.05;             // can look slightly up from ground
+controls.maxPolarAngle = Math.PI / 2.05;   // don't flip above the plane
+
+let useChaseCam = true;
+
+// --- Chase camera updater ---
 function updateChaseCam() {
-  const behind = new THREE.Vector3(0, 1.2, 5.2);
+  const behind = new THREE.Vector3(0, 1.2, 5.2); // positive Z = behind
   const target = ship.localToWorld(behind.clone());
-  camera.position.lerp(target, 0.15);
-  camera.lookAt(ship.position);
+  chaseCam.position.lerp(target, 0.15);
+  chaseCam.lookAt(ship.position);
 }
-camera.position.set(0, 6, 8);
-camera.lookAt(ship.position);
 
 // --- Input ---
 const keys = new Set();
-addEventListener('keydown', e => keys.add(e.key.toLowerCase()));
+addEventListener('keydown', e => {
+  const k = e.key.toLowerCase();
+  keys.add(k);
+  if (k === 'c') toggleView();
+  if (k === 'h') toggleHUD();
+});
 addEventListener('keyup',   e => keys.delete(e.key.toLowerCase()));
 
 let padIndex = null;
@@ -176,21 +201,47 @@ function loop(now){
 
   ship.position.y = Math.max(ship.position.y, -3.0);
 
-  updateChaseCam();
-  renderer.render(scene, camera);
-
+  // --- Render with active camera ---
+  if (useChaseCam) {
+  updateChaseCam();                   // follow behind plane
+  renderer.render(scene, chaseCam);
+  } else {
+    groundCam.lookAt(ship.position);    // only rotate to face ship
+    renderer.render(scene, groundCam);
+  }
   const padState = pad ? 'GAMEPAD' : 'KEYBOARD';
   hud.textContent =
-`${padState}  THR ${(throttle*100|0)}%  SPD ${(v).toFixed(1)}
+`${padState}  THR ${(throttle*100|0)}%  SPD ${v.toFixed(1)}
 Pitch ${rad2deg(pitch)}°  Roll ${rad2deg(roll)}°  Yaw ${rad2deg(yaw % (Math.PI*2))}°
-Center (${centerX.toFixed(2)}, ${centerY.toFixed(2)})  DZ ${DEADZONE}`;
+View: ${useChaseCam ? 'CHASE' : 'GROUND'}   DZ ${DEADZONE}
+Center (${centerX.toFixed(2)}, ${centerY.toFixed(2)})`;
 }
 requestAnimationFrame(loop);
 
 function rad2deg(r){ return (r*180/Math.PI).toFixed(0); }
 
+// --- UI actions ---
+function toggleView(){
+  useChaseCam = !useChaseCam;
+  btnView.textContent = `View: ${useChaseCam ? 'Chase' : 'Ground'}`;
+  btnView.setAttribute('aria-pressed', String(useChaseCam));
+}
+function toggleHUD(){
+  const show = hud.style.display !== 'none';
+  const next = !show;
+  hud.style.display  = next ? '' : 'none';
+  help.style.display = next ? '' : 'none';
+  btnHUD.textContent = `HUD: ${next ? 'On' : 'Off'}`;
+  btnHUD.setAttribute('aria-pressed', String(next));
+}
+btnView.addEventListener('click', toggleView);
+btnHUD.addEventListener('click', toggleHUD);
+
+// --- Resize ---
 addEventListener('resize', ()=>{
-  camera.aspect = innerWidth/innerHeight;
-  camera.updateProjectionMatrix();
+  chaseCam.aspect = innerWidth/innerHeight;
+  chaseCam.updateProjectionMatrix();
+  groundCam.aspect = innerWidth/innerHeight;
+  groundCam.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
 });

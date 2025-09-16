@@ -14,6 +14,7 @@ html, body {
   text-shadow: 0 0 6px #0ff7;
   white-space: pre;
   user-select: none;
+  z-index: 5;
 }
 
 #help {
@@ -24,6 +25,33 @@ html, body {
   opacity: .9;
   font: 12px/1.35 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
   text-align: right;
-  max-width: 42ch;
+  max-width: 44ch;
   user-select: none;
+  z-index: 5;
 }
+
+/* Simple UI bar for toggles */
+#ui {
+  position: fixed;
+  left: 12px;
+  bottom: 12px;
+  display: flex;
+  gap: 8px;
+  z-index: 10;
+}
+
+#ui button {
+  appearance: none;
+  border: 1px solid #3ce1ff88;
+  background: #0b162a;
+  color: #dff;
+  font: 12px/1 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  padding: 10px 12px;
+  border-radius: 10px;
+  cursor: pointer;
+  box-shadow: 0 0 12px #00eaff22 inset, 0 0 8px #00eaff22;
+  transition: transform .06s ease, background .2s ease, box-shadow .2s ease;
+}
+
+#ui button:hover { transform: translateY(-1px); }
+#ui button[aria-pressed="false"] { opacity: .8; }
