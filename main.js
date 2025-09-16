@@ -15,6 +15,9 @@ document.body.appendChild(renderer.domElement);
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x1a2b4a);
 
+const smokeGroup = new THREE.Group();
+scene.add(smokeGroup);
+
 // Lighting
 scene.add(new THREE.HemisphereLight(0xbbeeff, 0x0a0f16, 0.8));
 const sun = new THREE.DirectionalLight(0xffffff, 0.9);
@@ -200,6 +203,32 @@ function loop(now){
   ship.position.addScaledVector(fwd, v*dt);
 
   ship.position.y = Math.max(ship.position.y, -3.0);
+
+  const smokeGeo = new THREE.SphereGeometry(0.3, 8, 8);
+  const smokeMat = new THREE.MeshBasicMaterial({ color: 0x888888, transparent: true, opacity: 0.6 });
+
+  const puff = new THREE.Mesh(smokeGeo, smokeMat);
+  puff.position.copy(ship.position);
+
+  // move puff slightly backward (so it appears at the engine)
+  const back = new THREE.Vector3(0,0,1).applyQuaternion(ship.quaternion).multiplyScalar(2);
+  puff.position.add(back);
+
+  puff.userData = { life: 1.0 }; // track fade
+  smokeGroup.add(puff);
+
+  // --- Update smoke particles ---
+  for (let i = smokeGroup.children.length - 1; i >= 0; i--) {
+    const puff = smokeGroup.children[i];
+    puff.userData.life -= dt * 0.1;          // fade speed
+    // puff.scale.multiplyScalar(1.01);         // grow slightly
+    puff.material.opacity = puff.userData.life;
+    if (puff.userData.life <= 0) {
+      smokeGroup.remove(puff);
+    }
+  }
+
+
 
   // --- Render with active camera ---
   if (useChaseCam) {
