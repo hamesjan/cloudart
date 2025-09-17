@@ -1,5 +1,6 @@
 import * as THREE from 'https://unpkg.com/three@0.159.0/build/three.module.js';
 import { OrbitControls } from './orbit_ctrls.js';
+import { TGALoader } from './TGALoader.js';
 
 const hud = document.getElementById('hud');
 const help = document.getElementById('help');
@@ -13,7 +14,7 @@ renderer.setSize(innerWidth, innerHeight);
 document.body.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x1a2b4a);
+scene.background = new THREE.Color(0x498dd1);
 
 const smokeGroup = new THREE.Group();
 scene.add(smokeGroup);
@@ -24,16 +25,42 @@ const sun = new THREE.DirectionalLight(0xffffff, 0.9);
 sun.position.set(20, 30, 10);
 scene.add(sun);
 
-// --- World: ground + reference boxes ---
-const ground = new THREE.GridHelper(4000, 200, 0x3ac7ff, 0x154e7a);
+// --- World: ground ---
+const loader = new THREE.TextureLoader();
+const grassTex = loader.load("assets/pixel_grass_color.png");
+const grassNormal = loader.load("assets/grass_normal.png");
+const grassDisp = loader.load("assets/grass_height.png");
+
+grassTex.wrapS = grassTex.wrapT = THREE.RepeatWrapping;
+grassNormal.wrapS = grassNormal.wrapT = THREE.RepeatWrapping;
+grassDisp.wrapS = grassDisp.wrapT = THREE.RepeatWrapping;
+
+grassTex.repeat.set(100, 100);
+grassNormal.repeat.set(100, 100);
+
+const groundGeo = new THREE.PlaneGeometry(4000, 4000, 512, 512);
+const groundMat = new THREE.MeshStandardMaterial({
+  map: grassTex,
+  normalMap: grassNormal,
+  displacementMap: grassDisp,
+  displacementScale: 20,
+  roughness: 0.6,
+  color: 0xdddddd,   // brighte
+  emissive: 0x333333,         // subtle self-light
+emissiveIntensity: 0.5
+});
+const ground = new THREE.Mesh(groundGeo, groundMat);
+ground.rotation.x = -Math.PI / 2;
 ground.position.y = -5;
 scene.add(ground);
+
+// buildings
 
 const refGroup = new THREE.Group();
 scene.add(refGroup);
 for (let i = 0; i < 60; i++) {
   const m = new THREE.Mesh(
-    new THREE.BoxGeometry(4, THREE.MathUtils.randFloat(4,14), 4),
+    new THREE.BoxGeometry(4, THREE.MathUtils.randFloat(4,25), 4),
     new THREE.MeshStandardMaterial({ color: 0x7dd3fc, metalness:0.1, roughness:0.6 })
   );
   const r = THREE.MathUtils.randFloat(40, 400);
@@ -41,6 +68,17 @@ for (let i = 0; i < 60; i++) {
   m.position.set(Math.cos(a)*r, m.geometry.parameters.height/2 - 5, Math.sin(a)*r);
   refGroup.add(m);
 }
+
+// sun
+
+const sunGeo = new THREE.SphereGeometry(20, 32, 32);
+const sunMat = new THREE.MeshBasicMaterial({ color: 0xffee88 });
+const sunMesh = new THREE.Mesh(sunGeo, sunMat);
+
+// put it far in the sky
+sunMesh.position.set(500, 800, -1000);
+scene.add(sunMesh);
+
 
 // --- Ship (cone + wings) ---
 const ship = new THREE.Group();
@@ -64,7 +102,7 @@ const ship = new THREE.Group();
   wings.position.set(0, 0, -0.2);
   ship.add(wings);
 }
-ship.position.set(0, 4, 0);
+ship.position.set(0, 10, 0);
 scene.add(ship);
 
 // --- Cameras ---
@@ -72,31 +110,25 @@ const chaseCam = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.1, 20
 chaseCam.position.set(0, 6, 8);
 chaseCam.lookAt(ship.position);
 
-// Ground spectator camera (fixed world position, orbit around the ship)
 const groundCam = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.1, 2000);
-// groundCam.position.set(0, 18, 60);
-groundCam.position.set(0, ground.position.y + 10, 80);
-// groundCam.lookAt(ship.position);
+groundCam.position.set(0, ground.position.y + 20, 80);
 
 const controls = new OrbitControls(groundCam, renderer.domElement);
 controls.enableDamping = true;
 controls.enablePan = true;
 controls.enableZoom = true;
 controls.target.copy(ship.position);
-// Keep it feeling like a ground camera
 controls.minDistance = 8;
 controls.maxDistance = 220;
-controls.minPolarAngle = 0.05;             // can look slightly up from ground
-controls.maxPolarAngle = Math.PI / 2.05;   // don't flip above the plane
+controls.minPolarAngle = 0.05;
+controls.maxPolarAngle = Math.PI / 2.05;
 
 let useChaseCam = true;
-// --- Smoke state ---
-let smokeEnabled = true; // start ON
-
+let smokeEnabled = true;
 
 // --- Chase camera updater ---
 function updateChaseCam() {
-  const behind = new THREE.Vector3(0, 1.2, 5.2); // positive Z = behind
+  const behind = new THREE.Vector3(0, 5.0, 6.2);
   const target = ship.localToWorld(behind.clone());
   chaseCam.position.lerp(target, 0.15);
   chaseCam.lookAt(ship.position);
@@ -140,6 +172,29 @@ const pitchRate = 1.8, yawRate = 1.6, rollRate = 2.2;
 const autoLevel = 0.9, maxBank = 0.75;
 const cruiseSpeed = 35;
 
+// --- Smoke puff generator (fluffy clump of spheres) ---
+function createSmokePuff() {
+  const group = new THREE.Group();
+  for (let i = 0; i < 5; i++) {
+    const geo = new THREE.SphereGeometry(0.25 + Math.random() * 0.15, 8, 8);
+    const mat = new THREE.MeshStandardMaterial({
+      color: 0xdbdad9,
+      transparent: true,
+      opacity: 0.4,
+      roughness: 1.0
+    });
+    const s = new THREE.Mesh(geo, mat);
+    s.position.set(
+      (Math.random() - 0.5) * 0.5,
+      (Math.random() - 0.5) * 0.5,
+      (Math.random() - 0.5) * 0.5
+    );
+    group.add(s);
+  }
+  group.userData = { life: 8.0, maxLife: 3.0 };
+  return group;
+}
+
 // --- Loop ---
 let last = performance.now();
 
@@ -153,7 +208,7 @@ function loop(now){
   if (pad){
     const ax0 = pad.axes[0] ?? 0;
     const ax1 = pad.axes[1] ?? 0;
-      // Toggle smoke with gamepad Button 0 (on press, not hold)
+
     if (pad.buttons[0]?.pressed && !pad.prevSmokePressed) {
       smokeEnabled = !smokeEnabled;
       console.log("Smoke:", smokeEnabled ? "ON" : "OFF");
@@ -193,12 +248,11 @@ function loop(now){
     if (keys.has('e')) iYaw += 1;
     if (keys.has(' ')) tUp = true;
     if (keys.has('shift')) tDown = true;
-      if (keys.has('t')) {
-    smokeEnabled = !smokeEnabled;
-    keys.delete('t'); // prevents multiple toggles while held
-    console.log("Smoke:", smokeEnabled ? "ON" : "OFF");
-  }
-
+    if (keys.has('t')) {
+      smokeEnabled = !smokeEnabled;
+      keys.delete('t');
+      console.log("Smoke:", smokeEnabled ? "ON" : "OFF");
+    }
   }
 
   if (tUp)   throttle = Math.min(throttleMax, throttle + throttleAccel*dt);
@@ -219,42 +273,36 @@ function loop(now){
 
   ship.position.y = Math.max(ship.position.y, -3.0);
 
-  const smokeGeo = new THREE.SphereGeometry(0.3, 8, 8);
-  const smokeMat = new THREE.MeshBasicMaterial({ color: 0x888888, transparent: true, opacity: 0.6 });
-
-
+  // --- Spawn smoke puff ---
   if (smokeEnabled) {
-    const puff = new THREE.Mesh(smokeGeo, smokeMat.clone());
+    const puff = createSmokePuff();
     puff.position.copy(ship.position);
-
     const back = new THREE.Vector3(0,0,1).applyQuaternion(ship.quaternion).multiplyScalar(2);
     puff.position.add(back);
-
-    puff.userData = { life: 3.0 };
     smokeGroup.add(puff);
   }
 
   // --- Update smoke particles ---
   for (let i = smokeGroup.children.length - 1; i >= 0; i--) {
     const puff = smokeGroup.children[i];
-    puff.userData.life -= dt * 0.1;          // fade speed
-    // puff.scale.multiplyScalar(1.01);         // grow slightly
-    puff.material.opacity = puff.userData.life;
-    if (puff.userData.life <= 0) {
-      smokeGroup.remove(puff);
-    }
+    puff.userData.life -= dt;
+    const t = 1.0 - puff.userData.life / puff.userData.maxLife;
+
+    puff.scale.setScalar(1 + t * 1.5); // grow moderately
+    puff.children.forEach(s => s.material.opacity = 0.3 * (1.0 - t)); // fade spheres
+
+    if (puff.userData.life <= 0) smokeGroup.remove(puff);
   }
 
-
-
-  // --- Render with active camera ---
+  // --- Render ---
   if (useChaseCam) {
-  updateChaseCam();                   // follow behind plane
-  renderer.render(scene, chaseCam);
+    updateChaseCam();
+    renderer.render(scene, chaseCam);
   } else {
-    groundCam.lookAt(ship.position);    // only rotate to face ship
+    groundCam.lookAt(ship.position);
     renderer.render(scene, groundCam);
   }
+
   const padState = pad ? 'GAMEPAD' : 'KEYBOARD';
   hud.textContent =
 `${padState}  THR ${(throttle*100|0)}%  SPD ${v.toFixed(1)}
