@@ -1,6 +1,6 @@
 import * as THREE from 'https://unpkg.com/three@0.159.0/build/three.module.js';
 import { OrbitControls } from './orbit_ctrls.js';
-import { TGALoader } from './TGALoader.js';
+import { GLTFLoader } from './GLTFLoader.js';
 
 const hud = document.getElementById('hud');
 const help = document.getElementById('help');
@@ -28,7 +28,7 @@ scene.add(sun);
 // --- World: ground ---
 const loader = new THREE.TextureLoader();
 const grassTex = loader.load("assets/pixel_grass_color.png");
-const grassNormal = loader.load("assets/grass_normal.png");
+const grassNormal = loader.load("assets/pixel_grass_normal.png");
 const grassDisp = loader.load("assets/grass_height.png");
 
 grassTex.wrapS = grassTex.wrapT = THREE.RepeatWrapping;
@@ -81,29 +81,52 @@ scene.add(sunMesh);
 
 
 // --- Ship (cone + wings) ---
-const ship = new THREE.Group();
-{
-  const hull = new THREE.Mesh(
-    new THREE.ConeGeometry(0.8, 2.8, 6),
-    new THREE.MeshStandardMaterial({
-      color: 0x8bf6ff, metalness:0.2, roughness:0.3, emissive:0x1c7ea3, emissiveIntensity:0.25
-    })
-  );
-  hull.rotation.z = Math.PI;
-  hull.position.y = 0.25;
-  ship.add(hull);
+const ship = new THREE.Group();  // keep group for compatibility
+let mixer;
+const gltfLoader = new GLTFLoader();
+gltfLoader.load("assets/airplane.glb", (gltf) => {
+  const airplane = gltf.scene;
+  airplane.scale.set(2, 2, 2);
+  airplane.rotation.y = Math.PI;
 
-  const wings = new THREE.Mesh(
-    new THREE.BoxGeometry(3.0, 0.08, 0.3),
-    new THREE.MeshStandardMaterial({
-      color: 0xff9bd4, metalness:0.2, roughness:0.45, emissive:0x8a2a60, emissiveIntensity:0.15
-    })
-  );
-  wings.position.set(0, 0, -0.2);
-  ship.add(wings);
-}
+  ship.add(airplane);
+
+  // --- animations ---
+  if (gltf.animations && gltf.animations.length) {
+    mixer = new THREE.AnimationMixer(airplane);
+    gltf.animations.forEach((clip) => {
+      const action = mixer.clipAction(clip);
+      action.play();
+    });
+  }
+});
+
+// Position the ship in the world
 ship.position.set(0, 10, 0);
 scene.add(ship);
+// const ship = new THREE.Group();
+// {
+//   const hull = new THREE.Mesh(
+//     new THREE.ConeGeometry(0.8, 2.8, 6),
+//     new THREE.MeshStandardMaterial({
+//       color: 0x8bf6ff, metalness:0.2, roughness:0.3, emissive:0x1c7ea3, emissiveIntensity:0.25
+//     })
+//   );
+//   hull.rotation.z = Math.PI;
+//   hull.position.y = 0.25;
+//   ship.add(hull);
+
+//   const wings = new THREE.Mesh(
+//     new THREE.BoxGeometry(3.0, 0.08, 0.3),
+//     new THREE.MeshStandardMaterial({
+//       color: 0xff9bd4, metalness:0.2, roughness:0.45, emissive:0x8a2a60, emissiveIntensity:0.15
+//     })
+//   );
+//   wings.position.set(0, 0, -0.2);
+//   ship.add(wings);
+// }
+// ship.position.set(0, 10, 0);
+// scene.add(ship);
 
 // --- Cameras ---
 const chaseCam = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.1, 2000);
@@ -128,7 +151,7 @@ let smokeEnabled = true;
 
 // --- Chase camera updater ---
 function updateChaseCam() {
-  const behind = new THREE.Vector3(0, 5.0, 6.2);
+  const behind = new THREE.Vector3(0, 10.0, 30);
   const target = ship.localToWorld(behind.clone());
   chaseCam.position.lerp(target, 0.15);
   chaseCam.lookAt(ship.position);
@@ -277,7 +300,7 @@ function loop(now){
   if (smokeEnabled) {
     const puff = createSmokePuff();
     puff.position.copy(ship.position);
-    const back = new THREE.Vector3(0,0,1).applyQuaternion(ship.quaternion).multiplyScalar(2);
+    const back = new THREE.Vector3(0,0,8).applyQuaternion(ship.quaternion).multiplyScalar(2);
     puff.position.add(back);
     smokeGroup.add(puff);
   }
@@ -294,13 +317,16 @@ function loop(now){
     if (puff.userData.life <= 0) smokeGroup.remove(puff);
   }
 
+  // --- Spin propeller ---
+
+  if (mixer) mixer.update(dt);
   // --- Render ---
   if (useChaseCam) {
     updateChaseCam();
     renderer.render(scene, chaseCam);
   } else {
     groundCam.lookAt(ship.position);
-    renderer.render(scene, groundCam);
+    renderer.render(scene, groundCam);wa
   }
 
   const padState = pad ? 'GAMEPAD' : 'KEYBOARD';
