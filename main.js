@@ -51,7 +51,7 @@ emissiveIntensity: 0.5
 });
 const ground = new THREE.Mesh(groundGeo, groundMat);
 ground.rotation.x = -Math.PI / 2;
-ground.position.y = -5;
+ground.position.y = -20;
 scene.add(ground);
 
 // buildings
@@ -102,8 +102,15 @@ gltfLoader.load("assets/airplane.glb", (gltf) => {
 });
 
 // Position the ship in the world
-ship.position.set(0, 10, 0);
+ship.position.set(0, 0, 0);
 scene.add(ship);
+let speed = 0;                // plane is stopped
+let isAirborne = false;     
+
+const accel = 15;              // how quickly throttle turns into forward accel
+const drag = 0.02;             // slows plane if throttle low
+
+const takeoffSpeed = 40;       // speed threshold for liftoff
 // const ship = new THREE.Group();
 // {
 //   const hull = new THREE.Mesh(
@@ -188,7 +195,7 @@ function axisWithDeadzone(v, center, dz = DEADZONE){
 
 // --- Flight state ---
 let throttle = 0.45;
-const throttleMin = 0.15, throttleMax = 1.5, throttleAccel = 0.8;
+const throttleMin = 0.0, throttleMax = 1.5, throttleAccel = 0.8;
 
 let pitch = 0, yaw = 0, roll = 0;
 const pitchRate = 1.8, yawRate = 1.6, rollRate = 2.2;
@@ -281,18 +288,47 @@ function loop(now){
   if (tUp)   throttle = Math.min(throttleMax, throttle + throttleAccel*dt);
   if (tDown) throttle = Math.max(throttleMin, throttle - throttleAccel*dt);
 
-  pitch = THREE.MathUtils.clamp(pitch + iPitch*pitchRate*dt, -0.9, 0.9);
-  roll  = THREE.MathUtils.clamp(roll  + iRoll*rollRate*dt,  -maxBank, maxBank);
-  yaw   = yaw + (iYaw*yawRate + roll*0.6)*dt;
+  speed += (throttle * accel - drag * speed) * dt;
+  if (speed < 0) speed = 0;
 
-  roll  *= (1.0 - Math.min(autoLevel*dt, 0.12));
-  pitch *= (1.0 - 0.40*dt);
 
-  ship.rotation.set(pitch, yaw, roll);
+    if (!isAirborne) {
+    ship.position.y = 0;
+
+    // Require enough speed and a pull-up command
+    if (speed > takeoffSpeed && iPitch > 0) {
+      isAirborne = true;
+    }
+  } else {
+    ship.position.y = Math.max(ship.position.y, 0);
+  }
+
+
+
+  if (isAirborne) {
+    // --- In the air: full flight controls ---
+    pitch = THREE.MathUtils.clamp(pitch + iPitch * pitchRate * dt, -0.9, 0.9);
+    roll  = THREE.MathUtils.clamp(roll  + iRoll  * rollRate  * dt, -maxBank, maxBank);
+    yaw   = yaw + (iYaw * yawRate + roll * 0.6) * dt;
+
+    // auto-leveling
+    roll  *= (1.0 - Math.min(autoLevel * dt, 0.12));
+    pitch *= (1.0 - 0.40 * dt);
+
+    ship.rotation.set(pitch, yaw, roll);
+
+  } else {
+    // --- On the ground: lock pitch/roll, but allow yaw steering ---
+    pitch = 0;
+    roll  = 0;
+    yaw   = yaw + (iYaw * yawRate * dt);
+
+    ship.rotation.set(0, yaw, 0);
+  }
 
   const fwd = new THREE.Vector3(0,0,-1).applyQuaternion(ship.quaternion).normalize();
   const v = cruiseSpeed * throttle;
-  ship.position.addScaledVector(fwd, v*dt);
+  ship.position.addScaledVector(fwd, speed*dt);
 
   ship.position.y = Math.max(ship.position.y, -3.0);
 
