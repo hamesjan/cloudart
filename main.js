@@ -111,6 +111,12 @@ const accel = 15;              // how quickly throttle turns into forward accel
 const drag = 0.02;             // slows plane if throttle low
 
 const takeoffSpeed = 40;       // speed threshold for liftoff
+
+
+ const idle = 0.2;              // what it drifts toward (0 = full off, 0.2 = cruise idle)
+  const decayRate = 0.6;         // how fast it drifts back per second
+  
+
 // const ship = new THREE.Group();
 // {
 //   const hull = new THREE.Mesh(
@@ -195,7 +201,7 @@ function axisWithDeadzone(v, center, dz = DEADZONE){
 
 // --- Flight state ---
 let throttle = 0.45;
-const throttleMin = 0.0, throttleMax = 1.5, throttleAccel = 0.8;
+const throttleMin = 0.0, throttleMax = 5.0, throttleAccel = 0.8;
 
 let pitch = 0, yaw = 0, roll = 0;
 const pitchRate = 1.8, yawRate = 1.6, rollRate = 2.2;
@@ -291,7 +297,6 @@ function loop(now){
   speed += (throttle * accel - drag * speed) * dt;
   if (speed < 0) speed = 0;
 
-
     if (!isAirborne) {
     ship.position.y = 0;
 
@@ -325,6 +330,14 @@ function loop(now){
 
     ship.rotation.set(0, yaw, 0);
   }
+
+  if (throttle > idle) {
+    throttle = Math.max(idle, throttle - decayRate * dt);
+    } else if (throttle < idle) {
+      if (isAirborne){
+              throttle = Math.min(idle, throttle + decayRate * dt);
+      }
+    }
 
   const fwd = new THREE.Vector3(0,0,-1).applyQuaternion(ship.quaternion).normalize();
   const v = cruiseSpeed * throttle;
@@ -362,12 +375,12 @@ function loop(now){
     renderer.render(scene, chaseCam);
   } else {
     groundCam.lookAt(ship.position);
-    renderer.render(scene, groundCam);wa
+    renderer.render(scene, groundCam);
   }
 
   const padState = pad ? 'GAMEPAD' : 'KEYBOARD';
   hud.textContent =
-`${padState}  THR ${(throttle*100|0)}%  SPD ${v.toFixed(1)}
+`${padState}  THR ${(throttle*100|0)}%  SPD ${speed.toFixed(1)}
 Pitch ${rad2deg(pitch)}°  Roll ${rad2deg(roll)}°  Yaw ${rad2deg(yaw % (Math.PI*2))}°
 View: ${useChaseCam ? 'CHASE' : 'GROUND'}   DZ ${DEADZONE}
 Center (${centerX.toFixed(2)}, ${centerY.toFixed(2)})`;
