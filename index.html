@@ -7,21 +7,35 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <div id="hud"></div>
-
-  <div id="help">
-    <b>Controls</b><br>
-    Left stick: pitch/roll<br>
-    LB / RB: yaw<br>
-    Btn 0: throttle up • Btn 1: throttle down<br>
-    Keyboard: W/S (pitch), A/D (roll), Q/E (yaw), Space/Shift (throttle)<br>
-    <small>Hotkeys: C = switch view, H = toggle HUD</small>
+  <!-- Welcome Screen -->
+  <div id="welcome" class="screen active">
+    <h1>Welcome, Pilot</h1>
+    <input id="playerName" placeholder="Enter your name">
+    <button id="playBtn">Play</button>
   </div>
 
-  <!-- On-screen UI toggles -->
-  <div id="ui">
-    <button id="toggleView" aria-pressed="true">View: Chase</button>
-    <button id="toggleHUD" aria-pressed="true">HUD: On</button>
+  <!-- Game Screen -->
+  <div id="game" class="screen">
+    <div id="hud"></div>
+    <div id="help">
+      <b>Controls</b><br>
+      Left stick: pitch/roll<br>
+      LB / RB: yaw<br>
+      Btn 0: throttle up • Btn 1: throttle down<br>
+      Keyboard: W/S (pitch), A/D (roll), Q/E (yaw), Space/Shift (throttle)<br>
+      <small>Hotkeys: C = switch view, H = toggle HUD</small>
+    </div>
+    <div id="ui">
+      <button id="toggleView" aria-pressed="true">View: Chase</button>
+      <button id="toggleHUD" aria-pressed="true">HUD: On</button>
+    </div>
+  </div>
+
+  <!-- Game Over Screen -->
+  <div id="gameover" class="screen">
+    <h1>Game Over</h1>
+    <p id="finalMsg"></p>
+    <button id="restartBtn">Restart</button>
   </div>
 
   <script type="module" src="main.js"></script>

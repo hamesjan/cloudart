@@ -1,6 +1,52 @@
+// state logic
 import * as THREE from 'https://unpkg.com/three@0.159.0/build/three.module.js';
 import { OrbitControls } from './orbit_ctrls.js';
 import { GLTFLoader } from './GLTFLoader.js';
+
+const welcome   = document.getElementById('welcome');
+const game      = document.getElementById('game');
+const gameover  = document.getElementById('gameover');
+const playBtn   = document.getElementById('playBtn');
+const restartBtn= document.getElementById('restartBtn');
+const finalMsg  = document.getElementById('finalMsg');
+const playerNameInput = document.getElementById('playerName');
+
+let playerName = "";
+let gameStarted = false;
+let gameOver = false;
+
+function showScreen(id) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+}
+
+
+playBtn.addEventListener('click', () => {
+  playerName = playerNameInput.value || "Pilot";
+  startGame();
+});
+restartBtn.addEventListener('click', () => {
+  location.reload(); // simplest reset: reload page
+});
+
+
+function startGame() {
+  showScreen('game');
+  gameStarted = true;
+  initThreeScene();
+}
+
+function endGame() {
+  gameOver = true;
+  showScreen('gameover');
+  finalMsg.textContent = `${playerName}, you crashed!`;
+}
+
+
+
+// game logic
+function initThreeScene() {
+
 
 const hud = document.getElementById('hud');
 const help = document.getElementById('help');
@@ -11,7 +57,7 @@ const btnHUD  = document.getElementById('toggleHUD');
 const renderer = new THREE.WebGLRenderer({ antialias:true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.setSize(innerWidth, innerHeight);
-document.body.appendChild(renderer.domElement);
+document.getElementById("game").appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x498dd1);
@@ -106,6 +152,8 @@ ship.position.set(0, 0, 0);
 scene.add(ship);
 let speed = 0;                // plane is stopped
 let isAirborne = false;     
+let airborneTimer = 0;    // counts seconds in air
+
 
 const accel = 15;              // how quickly throttle turns into forward accel
 const drag = 0.02;             // slows plane if throttle low
@@ -303,9 +351,13 @@ function loop(now){
     // Require enough speed and a pull-up command
     if (speed > takeoffSpeed && iPitch > 0) {
       isAirborne = true;
-    }
+    airborneTimer = 0;   // reset timer at liftoff
+        }
   } else {
     ship.position.y = Math.max(ship.position.y, 0);
+    if (airborneTimer < 5.0){
+      airborneTimer += dt;   // accumulate time in air
+    }
   }
 
 
@@ -384,6 +436,12 @@ function loop(now){
 Pitch ${rad2deg(pitch)}°  Roll ${rad2deg(roll)}°  Yaw ${rad2deg(yaw % (Math.PI*2))}°
 View: ${useChaseCam ? 'CHASE' : 'GROUND'}   DZ ${DEADZONE}
 Center (${centerX.toFixed(2)}, ${centerY.toFixed(2)})`;
+
+if (isAirborne && airborneTimer > 2.0 && ship.position.y <= 0.1) {
+  endGame();
+  return;
+}
+
 }
 requestAnimationFrame(loop);
 
@@ -414,3 +472,5 @@ addEventListener('resize', ()=>{
   groundCam.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
 });
+
+}
