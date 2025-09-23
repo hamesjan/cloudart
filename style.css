@@ -30,6 +30,10 @@ html, body {
   z-index: 5;
 }
 
+#playBtn{
+  margin-top: 20px;
+}
+
 /* Simple UI bar for toggles */
 #ui {
   position: fixed;

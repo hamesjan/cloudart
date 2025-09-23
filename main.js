@@ -260,11 +260,11 @@ const cruiseSpeed = 35;
 function createSmokePuff() {
   const group = new THREE.Group();
   for (let i = 0; i < 5; i++) {
-    const geo = new THREE.SphereGeometry(0.25 + Math.random() * 0.15, 8, 8);
+    const geo = new THREE.SphereGeometry(0.8 + Math.random() * 0.15, 8, 8);
     const mat = new THREE.MeshStandardMaterial({
       color: 0xdbdad9,
       transparent: true,
-      opacity: 0.4,
+      opacity: 0.8,
       roughness: 1.0
     });
     const s = new THREE.Mesh(geo, mat);
@@ -275,7 +275,7 @@ function createSmokePuff() {
     );
     group.add(s);
   }
-  group.userData = { life: 8.0, maxLife: 3.0 };
+  group.userData = { life: 1800.0, maxLife: 1799.0 };
   return group;
 }
 
@@ -407,16 +407,16 @@ function loop(now){
   }
 
   // --- Update smoke particles ---
-  for (let i = smokeGroup.children.length - 1; i >= 0; i--) {
-    const puff = smokeGroup.children[i];
-    puff.userData.life -= dt;
-    const t = 1.0 - puff.userData.life / puff.userData.maxLife;
+  // for (let i = smokeGroup.children.length - 1; i >= 0; i--) {
+  //   const puff = smokeGroup.children[i];
+  //   puff.userData.life -= dt;
+  //   const t = 1.0 - puff.userData.life / puff.userData.maxLife;
 
-    puff.scale.setScalar(1 + t * 1.5); // grow moderately
-    puff.children.forEach(s => s.material.opacity = 0.3 * (1.0 - t)); // fade spheres
+  //   puff.scale.setScalar(1 + t * 1.5); // grow moderately
+  //   puff.children.forEach(s => s.material.opacity = 0.1 * (1.0 - t)); // fade spheres
 
-    if (puff.userData.life <= 0) smokeGroup.remove(puff);
-  }
+  //   if (puff.userData.life <= 0) smokeGroup.remove(puff);
+  // }
 
   // --- Spin propeller ---
 
