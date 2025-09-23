@@ -62,8 +62,7 @@ document.getElementById("game").appendChild(renderer.domElement);
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x498dd1);
 
-const smokeGroup = new THREE.Group();
-scene.add(smokeGroup);
+
 
 // Lighting
 scene.add(new THREE.HemisphereLight(0xbbeeff, 0x0a0f16, 0.8));
@@ -150,6 +149,71 @@ gltfLoader.load("assets/airplane.glb", (gltf) => {
 // Position the ship in the world
 ship.position.set(0, 0, 0);
 scene.add(ship);
+
+// --- Balloons (two circles behind plane) ---
+const balloons = new THREE.Group();
+
+function makeBalloon(offsetZ){
+  const geo = new THREE.SphereGeometry(1, 16, 16); // radius 3.5
+  const mat = new THREE.MeshStandardMaterial({
+    color: 0xff4d6d,
+    emissive: 0x771122,
+    emissiveIntensity: 0.4,
+    roughness: 0.5,
+    metalness: 0.1
+  });
+  const balloon = new THREE.Mesh(geo, mat);
+
+  // Place balloon directly behind plane, centered on X
+  balloon.position.set(0, -2.0, offsetZ);
+  return balloon;
+}
+
+// Two balloons, one further back than the other
+balloons.add(makeBalloon(12));
+balloons.add(makeBalloon(16));
+
+ship.add(balloons);
+
+
+
+// Darts
+
+const darts = [];  // active darts
+const dartSpeed = 500;      // bullet speed (was 80)
+const dartRange = 2000;     // 2 km range
+const dartGravity = -0.5;   // very small drop (or set to 0 for laser-like)
+
+
+function fireDart(){
+  // Bigger, black dart
+  const geo = new THREE.BoxGeometry(0.6, 0.6, 8.0);
+  const mat = new THREE.MeshStandardMaterial({ color: 0x000000, metalness:0.3, roughness:0.5 });
+  const dart = new THREE.Mesh(geo, mat);
+
+  // Nose offset in front of the plane (world space)
+  const noseOffset = new THREE.Vector3(0, 0, -8); 
+  const noseWorld = noseOffset.clone().applyMatrix4(ship.matrixWorld);
+  dart.position.copy(noseWorld);
+
+  // Orientation matches plane’s facing
+  dart.quaternion.copy(ship.quaternion);
+
+  // Forward direction (nose of plane in world space)
+  const forward = new THREE.Vector3(0,0,-1).applyQuaternion(ship.quaternion).normalize();
+
+  dart.userData = {
+    vel: forward.multiplyScalar(500), // much faster bullet speed
+    traveled: 0
+  };
+
+  scene.add(dart);
+  darts.push(dart);
+}
+
+
+
+// --- Flight state ---
 let speed = 0;                // plane is stopped
 let isAirborne = false;     
 let airborneTimer = 0;    // counts seconds in air
@@ -208,7 +272,6 @@ controls.minPolarAngle = 0.05;
 controls.maxPolarAngle = Math.PI / 2.05;
 
 let useChaseCam = true;
-let smokeEnabled = true;
 
 // --- Chase camera updater ---
 function updateChaseCam() {
@@ -225,6 +288,7 @@ addEventListener('keydown', e => {
   keys.add(k);
   if (k === 'c') toggleView();
   if (k === 'h') toggleHUD();
+  if (k === 'l') fireDart();
 });
 addEventListener('keyup',   e => keys.delete(e.key.toLowerCase()));
 
@@ -256,29 +320,6 @@ const pitchRate = 1.8, yawRate = 1.6, rollRate = 2.2;
 const autoLevel = 0.9, maxBank = 0.75;
 const cruiseSpeed = 35;
 
-// --- Smoke puff generator (fluffy clump of spheres) ---
-function createSmokePuff() {
-  const group = new THREE.Group();
-  for (let i = 0; i < 5; i++) {
-    const geo = new THREE.SphereGeometry(0.8 + Math.random() * 0.15, 8, 8);
-    const mat = new THREE.MeshStandardMaterial({
-      color: 0xdbdad9,
-      transparent: true,
-      opacity: 0.8,
-      roughness: 1.0
-    });
-    const s = new THREE.Mesh(geo, mat);
-    s.position.set(
-      (Math.random() - 0.5) * 0.5,
-      (Math.random() - 0.5) * 0.5,
-      (Math.random() - 0.5) * 0.5
-    );
-    group.add(s);
-  }
-  group.userData = { life: 1800.0, maxLife: 1799.0 };
-  return group;
-}
-
 // --- Loop ---
 let last = performance.now();
 
@@ -293,11 +334,6 @@ function loop(now){
     const ax0 = pad.axes[0] ?? 0;
     const ax1 = pad.axes[1] ?? 0;
 
-    if (pad.buttons[0]?.pressed && !pad.prevSmokePressed) {
-      smokeEnabled = !smokeEnabled;
-      console.log("Smoke:", smokeEnabled ? "ON" : "OFF");
-    }
-    pad.prevSmokePressed = pad.buttons[0]?.pressed;
 
     const nearCenter = Math.hypot(ax0-centerX, ax1-centerY) < 0.20;
     if (!calibrated && nearCenter && calibFrames < 60) {
@@ -332,11 +368,6 @@ function loop(now){
     if (keys.has('e')) iYaw += 1;
     if (keys.has(' ')) tUp = true;
     if (keys.has('shift')) tDown = true;
-    if (keys.has('t')) {
-      smokeEnabled = !smokeEnabled;
-      keys.delete('t');
-      console.log("Smoke:", smokeEnabled ? "ON" : "OFF");
-    }
   }
 
   if (tUp)   throttle = Math.min(throttleMax, throttle + throttleAccel*dt);
@@ -397,26 +428,25 @@ function loop(now){
 
   ship.position.y = Math.max(ship.position.y, -3.0);
 
-  // --- Spawn smoke puff ---
-  if (smokeEnabled) {
-    const puff = createSmokePuff();
-    puff.position.copy(ship.position);
-    const back = new THREE.Vector3(0,0,8).applyQuaternion(ship.quaternion).multiplyScalar(2);
-    puff.position.add(back);
-    smokeGroup.add(puff);
+  // --- Update darts ---
+  for (let i = darts.length - 1; i >= 0; i--) {
+    const d = darts[i];
+    const dtVel = d.userData.vel.clone().multiplyScalar(dt);
+
+    // apply gravity
+    d.userData.vel.y += dartGravity * dt;
+
+    // move dart
+    d.position.add(dtVel);
+
+    // track distance
+    d.userData.traveled += dtVel.length();
+    if (d.userData.traveled > dartRange) {
+      scene.remove(d);
+      darts.splice(i,1);
+    }
   }
 
-  // --- Update smoke particles ---
-  // for (let i = smokeGroup.children.length - 1; i >= 0; i--) {
-  //   const puff = smokeGroup.children[i];
-  //   puff.userData.life -= dt;
-  //   const t = 1.0 - puff.userData.life / puff.userData.maxLife;
-
-  //   puff.scale.setScalar(1 + t * 1.5); // grow moderately
-  //   puff.children.forEach(s => s.material.opacity = 0.1 * (1.0 - t)); // fade spheres
-
-  //   if (puff.userData.life <= 0) smokeGroup.remove(puff);
-  // }
 
   // --- Spin propeller ---
 
