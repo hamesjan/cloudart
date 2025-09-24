@@ -4,6 +4,7 @@ import { OrbitControls } from './orbit_ctrls.js';
 import { GLTFLoader } from './GLTFLoader.js';
 const socket = new WebSocket("ws://localhost:8080");
 
+
 socket.addEventListener('open', () => {
   console.log("✅ Connected to server");
 });
@@ -143,7 +144,9 @@ scene.add(sunMesh);
 // --- Ship (cone + wings) ---
 const ship = new THREE.Group();  // keep group for compatibility
 let mixer;
+let airplaneModel = null;        // <--- store model for cloning
 const gltfLoader = new GLTFLoader();
+
 gltfLoader.load("assets/airplane.glb", (gltf) => {
   const airplane = gltf.scene;
   airplane.scale.set(2, 2, 2);
@@ -151,7 +154,18 @@ gltfLoader.load("assets/airplane.glb", (gltf) => {
 
   ship.add(airplane);
 
-  // --- animations ---
+  // save for cloning later
+  airplaneModel = gltf;
+
+  for (const p of pendingPlayers) {
+  const clone = cloneGltf(airplaneModel).scene;
+    clone.scale.set(2, 2, 2);
+    scene.add(clone);
+    otherShips.set(p.id, clone);
+  }
+  pendingPlayers.length = 0;
+
+  // --- animations for my own ship ---
   if (gltf.animations && gltf.animations.length) {
     mixer = new THREE.AnimationMixer(airplane);
     gltf.animations.forEach((clip) => {
@@ -229,6 +243,7 @@ function fireDart(){
 // Multiplayer logic
 
 const otherShips = new Map();
+const pendingPlayers = [];  // players waiting for model load
 
 socket.addEventListener('message', (event) => {
   const data = JSON.parse(event.data);
@@ -237,22 +252,29 @@ socket.addEventListener('message', (event) => {
     myId = data.id;
     console.log("🎉 My ID is", myId);
   }
-  
+
   if (data.type === "state") {
     for (const p of data.players) {
-      // skip myself: compare id, not name
       if (p.id === myId) continue;
 
       let mesh = otherShips.get(p.id);
       if (!mesh) {
-        // for now, spawn a red cube (easier debug than cloning airplane)
-        const geo = new THREE.BoxGeometry(2, 2, 4);
-        const mat = new THREE.MeshStandardMaterial({ color: 0xff3333 });
-        mesh = new THREE.Mesh(geo, mat);
-        scene.add(mesh);
-        otherShips.set(p.id, mesh);
+        if (airplaneModel) {
+          const clone = cloneGltf(airplaneModel).scene;
+          clone.scale.set(2, 2, 2);
+          scene.add(clone);
+          mesh = clone;
+          otherShips.set(p.id, mesh);
+        } else {
+          // queue this player until airplaneModel is ready
+          if (!pendingPlayers.find(pp => pp.id === p.id)) {
+            pendingPlayers.push(p);
+          }
+          continue;
+        }
       }
 
+      // update transform
       mesh.position.set(p.x, p.y, p.z);
       mesh.rotation.set(p.pitch, p.yaw, p.roll);
     }
@@ -267,7 +289,48 @@ socket.addEventListener('message', (event) => {
   }
 });
 
+function cloneGltf(gltf) {
+  const clone = {
+    animations: gltf.animations,
+    scene: gltf.scene.clone(true)
+  };
 
+  const skinnedMeshes = {};
+  gltf.scene.traverse(node => {
+    if (node.isSkinnedMesh) {
+      skinnedMeshes[node.name] = node;
+    }
+  });
+
+  const cloneBones = {};
+  const cloneSkinnedMeshes = {};
+  clone.scene.traverse(node => {
+    if (node.isBone) {
+      cloneBones[node.name] = node;
+    }
+    if (node.isSkinnedMesh) {
+      cloneSkinnedMeshes[node.name] = node;
+    }
+  });
+
+  for (let name in skinnedMeshes) {
+    const skinnedMesh = skinnedMeshes[name];
+    const skeleton = skinnedMesh.skeleton;
+    const cloneSkinnedMesh = cloneSkinnedMeshes[name];
+    const orderedCloneBones = [];
+
+    for (let i = 0; i < skeleton.bones.length; ++i) {
+      const cloneBone = cloneBones[skeleton.bones[i].name];
+      orderedCloneBones.push(cloneBone);
+    }
+
+    cloneSkinnedMesh.bind(
+      new THREE.Skeleton(orderedCloneBones, skeleton.boneInverses),
+      cloneSkinnedMesh.matrixWorld
+    );
+  }
+  return clone;
+}
 
 
 // --- Flight state ---
