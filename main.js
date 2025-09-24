@@ -2,6 +2,21 @@
 import * as THREE from 'https://unpkg.com/three@0.159.0/build/three.module.js';
 import { OrbitControls } from './orbit_ctrls.js';
 import { GLTFLoader } from './GLTFLoader.js';
+const socket = new WebSocket("ws://localhost:8080");
+
+socket.addEventListener('open', () => {
+  console.log("✅ Connected to server");
+});
+socket.addEventListener('close', () => {
+  console.log("❌ Disconnected from server");
+});
+
+let myId = null;
+
+socket.addEventListener('open', () => console.log("✅ Connected to server"));
+socket.addEventListener('close', () => console.log("❌ Disconnected from server"));
+
+// Track other players' ships
 
 const welcome   = document.getElementById('welcome');
 const game      = document.getElementById('game');
@@ -210,6 +225,48 @@ function fireDart(){
   scene.add(dart);
   darts.push(dart);
 }
+
+// Multiplayer logic
+
+const otherShips = new Map();
+
+socket.addEventListener('message', (event) => {
+  const data = JSON.parse(event.data);
+
+  if (data.type === "welcome") {
+    myId = data.id;
+    console.log("🎉 My ID is", myId);
+  }
+  
+  if (data.type === "state") {
+    for (const p of data.players) {
+      // skip myself: compare id, not name
+      if (p.id === myId) continue;
+
+      let mesh = otherShips.get(p.id);
+      if (!mesh) {
+        // for now, spawn a red cube (easier debug than cloning airplane)
+        const geo = new THREE.BoxGeometry(2, 2, 4);
+        const mat = new THREE.MeshStandardMaterial({ color: 0xff3333 });
+        mesh = new THREE.Mesh(geo, mat);
+        scene.add(mesh);
+        otherShips.set(p.id, mesh);
+      }
+
+      mesh.position.set(p.x, p.y, p.z);
+      mesh.rotation.set(p.pitch, p.yaw, p.roll);
+    }
+
+    // remove disconnected players
+    for (const id of otherShips.keys()) {
+      if (!data.players.find(p => p.id === id)) {
+        scene.remove(otherShips.get(id));
+        otherShips.delete(id);
+      }
+    }
+  }
+});
+
 
 
 
@@ -470,6 +527,22 @@ Center (${centerX.toFixed(2)}, ${centerY.toFixed(2)})`;
 if (isAirborne && airborneTimer > 2.0 && ship.position.y <= 0.1) {
   endGame();
   return;
+}
+
+const inputData = {
+  player: playerName,
+  x: ship.position.x,
+  y: ship.position.y,
+  z: ship.position.z,
+  pitch: pitch,
+  roll: roll,
+  yaw: yaw,
+  throttle: throttle,
+  fire: keys.has('l')
+};
+
+if (socket.readyState === WebSocket.OPEN && Math.random() < 0.33) {
+  socket.send(JSON.stringify(inputData));
 }
 
 }

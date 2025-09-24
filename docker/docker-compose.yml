@@ -1,0 +1,15 @@
+version: "3.8"
+services:
+  cloudart-server:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: cloudart-server:latest
+    container_name: cloudart-server
+    environment:
+      PORT: "8080"
+      TICK_RATE: "30"
+      MAX_PLAYERS: "100"
+    ports:
+      - "8080:8080"
+    restart: unless-stopped

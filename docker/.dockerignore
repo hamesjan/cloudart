@@ -1,0 +1,14 @@
+# Node junk
+**/node_modules
+**/npm-debug.log
+**/yarn.lock
+**/.pnpm-store
+
+# VCS & OS
+.git
+.gitignore
+.DS_Store
+
+# Build output, caches
+**/dist
+**/.cache

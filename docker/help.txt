@@ -1,0 +1,9 @@
+docker build -f docker/Dockerfile -t cloudart-server .
+
+docker run --rm -p 8080:8080 cloudart-server
+
+
+
+// compose
+cd cloudart/docker
+docker compose up --build
