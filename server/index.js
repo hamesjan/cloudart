@@ -10,6 +10,7 @@ function broadcastState() {
   const state = [];
   players.forEach((val, id) => state.push({ id, ...val }));
   const msg = JSON.stringify({ type: "state", players: state });
+  console.log(msg);
   wss.clients.forEach(c => {
     if (c.readyState === c.OPEN) c.send(msg);
   });
@@ -18,13 +19,23 @@ function broadcastState() {
 wss.on("connection", (ws) => {
   const id = Math.random().toString(36).slice(2, 9);
   players.set(id, { player: "unknown", x:0, y:0, z:0, pitch:0, roll:0, yaw:0, throttle:0 });
+
+  // send welcome only to this client
   ws.send(JSON.stringify({ type: "welcome", id }));
+
+  // tell others a new player joined
+  const joinMsg = JSON.stringify({ type: "playerJoined", id });
+  wss.clients.forEach(c => {
+    if (c.readyState === c.OPEN && c !== ws) {
+      c.send(joinMsg);
+    }
+  });
+
   console.log(`✅ Client ${id} connected`);
 
   ws.on("message", (msg) => {
     try {
       const data = JSON.parse(msg);
-      // store data while preserving id
       players.set(id, { id, ...data });
     } catch (e) {
       console.error("Bad msg", msg.toString());
@@ -34,7 +45,13 @@ wss.on("connection", (ws) => {
   ws.on("close", () => {
     console.log(`❌ Client ${id} disconnected`);
     players.delete(id);
+
+    const leaveMsg = JSON.stringify({ type: "playerLeft", id });
+    wss.clients.forEach(c => {
+      if (c.readyState === c.OPEN) c.send(leaveMsg);
+    });
   });
 });
+
 
 setInterval(broadcastState, 50); // 20 Hz

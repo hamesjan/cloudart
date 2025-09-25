@@ -11,11 +11,18 @@ socket.addEventListener('open', () => {
 socket.addEventListener('close', () => {
   console.log("❌ Disconnected from server");
 });
-
 let myId = null;
 
-socket.addEventListener('open', () => console.log("✅ Connected to server"));
-socket.addEventListener('close', () => console.log("❌ Disconnected from server"));
+socket.addEventListener('message', (event) => {
+  const data = JSON.parse(event.data);
+
+  if (data.type === "welcome") {
+    myId = data.id;
+    console.log("🎉 My ID is", myId);
+  }
+
+});
+
 
 // Track other players' ships
 
@@ -58,8 +65,6 @@ function endGame() {
   finalMsg.textContent = `${playerName}, you crashed!`;
 }
 
-
-
 // game logic
 function initThreeScene() {
 
@@ -77,8 +82,6 @@ document.getElementById("game").appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x498dd1);
-
-
 
 // Lighting
 scene.add(new THREE.HemisphereLight(0xbbeeff, 0x0a0f16, 0.8));
@@ -131,7 +134,6 @@ for (let i = 0; i < 60; i++) {
 }
 
 // sun
-
 const sunGeo = new THREE.SphereGeometry(20, 32, 32);
 const sunMat = new THREE.MeshBasicMaterial({ color: 0xffee88 });
 const sunMesh = new THREE.Mesh(sunGeo, sunMat);
@@ -139,7 +141,6 @@ const sunMesh = new THREE.Mesh(sunGeo, sunMat);
 // put it far in the sky
 sunMesh.position.set(500, 800, -1000);
 scene.add(sunMesh);
-
 
 // --- Ship (cone + wings) ---
 const ship = new THREE.Group();  // keep group for compatibility
@@ -156,14 +157,6 @@ gltfLoader.load("assets/airplane.glb", (gltf) => {
 
   // save for cloning later
   airplaneModel = gltf;
-
-  for (const p of pendingPlayers) {
-  const clone = cloneGltf(airplaneModel).scene;
-    clone.scale.set(2, 2, 2);
-    scene.add(clone);
-    otherShips.set(p.id, clone);
-  }
-  pendingPlayers.length = 0;
 
   // --- animations for my own ship ---
   if (gltf.animations && gltf.animations.length) {
@@ -248,35 +241,66 @@ const pendingPlayers = [];  // players waiting for model load
 socket.addEventListener('message', (event) => {
   const data = JSON.parse(event.data);
 
-  if (data.type === "welcome") {
-    myId = data.id;
-    console.log("🎉 My ID is", myId);
-  }
-
   if (data.type === "state") {
     for (const p of data.players) {
-      if (p.id === myId) continue;
+      // console.log(p.id)
+      if (p.id === myId) {
+        console.log(p.id);
+        continue;
+
+      }
 
       let mesh = otherShips.get(p.id);
       if (!mesh) {
         if (airplaneModel) {
-          const clone = cloneGltf(airplaneModel).scene;
-          clone.scale.set(2, 2, 2);
-          scene.add(clone);
-          mesh = clone;
+          // Create group like my own ship
+          const cloneGroup = new THREE.Group();
+
+          // Add airplane clone
+
+          gltfLoader.load("assets/airplane.glb", (gltf) => {
+            const airplane = gltf.scene;
+            airplane.scale.set(2, 2, 2);
+            airplane.rotation.y = Math.PI;
+
+            cloneGroup.add(airplane);
+          });
+
+          // Add balloons (optional, to match yours)
+          const balloons = new THREE.Group();
+          function makeBalloon(offsetZ) {
+            const geo = new THREE.SphereGeometry(1, 16, 16);
+            const mat = new THREE.MeshStandardMaterial({
+              color: 0xff4d6d,
+              emissive: 0x771122,
+              emissiveIntensity: 0.4,
+              roughness: 0.5,
+              metalness: 0.1
+            });
+            const balloon = new THREE.Mesh(geo, mat);
+            balloon.position.set(0, -2.0, offsetZ);
+            return balloon;
+          }
+          balloons.add(makeBalloon(12));
+          balloons.add(makeBalloon(16));
+          cloneGroup.add(balloons);
+
+          // Add to scene and store
+          scene.add(cloneGroup);
+          mesh = cloneGroup;
           otherShips.set(p.id, mesh);
         } else {
-          // queue this player until airplaneModel is ready
           if (!pendingPlayers.find(pp => pp.id === p.id)) {
             pendingPlayers.push(p);
           }
           continue;
         }
-      }
+}
 
-      // update transform
-      mesh.position.set(p.x, p.y, p.z);
-      mesh.rotation.set(p.pitch, p.yaw, p.roll);
+    // Update group transform (exactly like my ship)
+    mesh.position.set(p.x, p.y, p.z);
+    mesh.quaternion.setFromEuler(new THREE.Euler(p.pitch, p.yaw, p.roll, "XYZ"));
+
     }
 
     // remove disconnected players
@@ -288,49 +312,6 @@ socket.addEventListener('message', (event) => {
     }
   }
 });
-
-function cloneGltf(gltf) {
-  const clone = {
-    animations: gltf.animations,
-    scene: gltf.scene.clone(true)
-  };
-
-  const skinnedMeshes = {};
-  gltf.scene.traverse(node => {
-    if (node.isSkinnedMesh) {
-      skinnedMeshes[node.name] = node;
-    }
-  });
-
-  const cloneBones = {};
-  const cloneSkinnedMeshes = {};
-  clone.scene.traverse(node => {
-    if (node.isBone) {
-      cloneBones[node.name] = node;
-    }
-    if (node.isSkinnedMesh) {
-      cloneSkinnedMeshes[node.name] = node;
-    }
-  });
-
-  for (let name in skinnedMeshes) {
-    const skinnedMesh = skinnedMeshes[name];
-    const skeleton = skinnedMesh.skeleton;
-    const cloneSkinnedMesh = cloneSkinnedMeshes[name];
-    const orderedCloneBones = [];
-
-    for (let i = 0; i < skeleton.bones.length; ++i) {
-      const cloneBone = cloneBones[skeleton.bones[i].name];
-      orderedCloneBones.push(cloneBone);
-    }
-
-    cloneSkinnedMesh.bind(
-      new THREE.Skeleton(orderedCloneBones, skeleton.boneInverses),
-      cloneSkinnedMesh.matrixWorld
-    );
-  }
-  return clone;
-}
 
 
 // --- Flight state ---
@@ -604,7 +585,7 @@ const inputData = {
   fire: keys.has('l')
 };
 
-if (socket.readyState === WebSocket.OPEN && Math.random() < 0.33) {
+if (socket.readyState === WebSocket.OPEN) {
   socket.send(JSON.stringify(inputData));
 }
 
