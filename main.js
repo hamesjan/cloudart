@@ -257,7 +257,6 @@ socket.addEventListener('message', (event) => {
           const cloneGroup = new THREE.Group();
 
           // Add airplane clone
-
           gltfLoader.load("assets/airplane.glb", (gltf) => {
             const airplane = gltf.scene;
             airplane.scale.set(2, 2, 2);
@@ -296,11 +295,9 @@ socket.addEventListener('message', (event) => {
           continue;
         }
 }
-
     // Update group transform (exactly like my ship)
     mesh.position.set(p.x, p.y, p.z);
     mesh.quaternion.setFromEuler(new THREE.Euler(p.pitch, p.yaw, p.roll, "XYZ"));
-
     }
 
     // remove disconnected players
